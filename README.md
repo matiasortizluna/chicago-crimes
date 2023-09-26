@@ -1,4 +1,4 @@
-![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/e26de271-308c-4196-a86b-721268456682)![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/ba27b176-4efc-4d99-af60-92ece0f8420f)# Welcome to chicago-crimes repository
+# Welcome to chicago-crimes repository
 
 Computer Science Master's degree “Data Mining II" subject project: Analysis of data of crimes in Chicago made in R.
 By Matias Luna, Inês Gonçalves, Ana Torres & Emma Romdhane.
