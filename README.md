@@ -51,6 +51,37 @@ As it is observable in the graph below, most of the crimes occur during the Summ
 
 ![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/98ac552d-66d6-4a92-861b-a76e5aead3dd)
 
+# Association rules
+
+o produce association rules, we only used the following features: Primary Type, Arrest, Year, Month, WeekDay, Time- OfDay, District, Ward and Community Area. The rules we obtained with support greater than 0.1 and confidence superior to 0.7 are the ones seen below.
+
+![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/096c95f2-0ccb-4c20-be22-2981dbd720ea)
+
+As we can see, most rules gravitate around Narcotics leading to Arrest, which we also observed when doing visual representation of the dataset.
+
+# Recommendations
+
+We have analyzed the relationship between ”Wards” and ”Primary Types”. Firstly, we tried using the association rules model in recommendation systems, but we have not obtained significant results.
+In order to gain some insight about the similarity between the different wards, we have also performed clustering. We have considered two different periods, before and after April 2020. 
+
+![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/80f6adec-2843-4e4c-a66e-6c3120a33504)
+
+![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/45164f64-94f5-4c4c-a487-45c3b10d89f9)
+
+![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/b9063885-259f-486c-8db3-c06fac1bc1d6)
+
+These results show that these are the wards with highest similarity when it comes to analysing the primary types of crime.
+
+# Link Analysis
+
+We decided to use wards as nodes to create the network. The edges represent a specific type of crime from the top 10 most significant primary types. Two nodes are linked if they both have records of that type of crime. This makes it possible for each pair of nodes to have 10 edges between them. Also,each edge has a weight associated, that represents the average amount of a specific type of crime shared between that pair of wards normalized.
+We used the igraph [4] package to build the network. Our next objective was to find community structure, so, for this purpose, we employed the Louvain algorithm. The results weren’t great, so we decided to consider a subgraph of the initial network for more interesting findings. We tried to filter only the edges that corresponded to Narcotics crimes and in which the weight was higher than 0.05 and ran the same algorithm for community detection. The visual representation of these communities can be seen on the following figure.
+
+![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/e642571d-7504-49d3-9ead-5f5b516efeb8)
+
+We can see the algorithm found 2 communities. The mod- ularity value of this partition is 0.0614, which is not great. Wards 24, 27 and 28 had the highest weighted degree and are in the same community, which was expected from what we had seen before. The lowest weighted degree belongs to ward 43, which means this is the ward with the lowest Narcotics proportion of crimes.
+In terms of closeness centrality, ward 37 had the highest value, while ward 28 had the lowest.
+
 # Modelling
 
 To ensure data quality, we performed data cleaning by removing NAs and irrelevant features. Unique identifiers like ’ID’ and ’case number’ were excluded to prevent overfitting and redundancy. Additionally, date-type columns were omited, although we re-used them as individual components. An initial RF execution was made to identify the features that have the most importance, and sadly, columns like ’Block’, ’IUCR’, ’Description’, and ’Location Description’ were considered among the most significant but couldn’t be included due to their large number of unique values and limited computational resources.
