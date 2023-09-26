@@ -7,9 +7,7 @@ By Matias Luna, Inês Gonçalves, Ana Torres & Emma Romdhane.
 For this assignment, we were provided with the Chicago Crimes dataset, a widely recognized and comprehensive col- lection of crime data, encompassing various offense categories, geographic information, and temporal details which covers the years 2017 to 2023.
 This project has two goals. The first one is to explore the dataset using visualizations, association rules, recommen- dations and link analysis. The second one is to build four machine learning models capable of predicting the occurrence of crimes (or specific characteristics associated with them).
 
-# The project
-
-# PRE-PROCESSING
+# Data Pre-Processing
 
 The first thing we did was pre-processing the data, which included the following tasks:
 
@@ -27,9 +25,9 @@ The first thing we did was pre-processing the data, which included the following
 
 Then, we focused on the data from the years between 2017 and 2022 to perform the analysis and train the model, and the crimes of 2023 to be tested on.
 
-# EXPLORATORY DATA ANALYSIS
+# Exploratory Data Analysis
 
-We used ggplot2 to produce the visualizations. The first thing we decided to analyse was the evolution of the Chicago crimes through time
+We used ggplot2 to produce the visualizations. The first thing we decided to analyse was the evolution of the Chicago crimes through time.
 
 It is clear the influence of the COVID-19 pandemic on crime rates, as we can see a drop in crime in April 2020 and February 2022, which correspond to periods of time where Stay-At- Home Executive or Advisory Orders were in place, as well as Cessation of Alcoholic Liquor Sales.
 
@@ -53,9 +51,9 @@ As it is observable in the graph below, most of the crimes occur during the Summ
 
 ![image](https://github.com/matiasortizluna/chicago-crimes/assets/64530615/98ac552d-66d6-4a92-861b-a76e5aead3dd)
 
-# MODELLING
+# Modelling
 
-To ensure data quality, we performed data cleaning by removing NAs and irrelevant features. Unique identifiers like ’ID’ and ’case number’ were excluded to prevent overfitting and redundancy. Additionally, date-type columns were omit- ted, although we re-used them as individual components. An initial RF execution was made to identify the features that have the most importance, and sadly, columns like ’Block’, ’IUCR’, ’Description’, and ’Location Description’ were considered among the most significant but couldn’t be included due to their large number of unique values and limited computational resources.
+To ensure data quality, we performed data cleaning by removing NAs and irrelevant features. Unique identifiers like ’ID’ and ’case number’ were excluded to prevent overfitting and redundancy. Additionally, date-type columns were omited, although we re-used them as individual components. An initial RF execution was made to identify the features that have the most importance, and sadly, columns like ’Block’, ’IUCR’, ’Description’, and ’Location Description’ were considered among the most significant but couldn’t be included due to their large number of unique values and limited computational resources.
 
 The selected features for the models included the FBI Code, Primary Type, Community Area, and variables representing police geographic area, district, and ward. We also incor- porated date-related variables, such as year, hour, weekday,month, nighttime, time of day, and season. Instead of using the ’Block’ column, we utilized latitude and longitude to capture crime locations. Additionally, we retained the ’Do- mestic’ column, as well as the target variable ’Arrest’ for our classification problem.
 
