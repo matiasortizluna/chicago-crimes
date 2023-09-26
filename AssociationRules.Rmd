@@ -1,0 +1,77 @@
+---
+title: "Assignment - Data Mining II"
+output: html_notebook
+date: "2023-05-26"
+---
+
+```{r}
+
+## -- Import libraries -------
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(arules)
+library(hydroTSM)
+library(geosphere)
+library(recommenderlab)
+library(readr)
+#library(tidymodels)
+#library(base)
+#library(remotes)
+#library(caret)
+
+## -- Set directory -------
+setwd("D:/Filipa/Documents/CompSci/DataMiningII/Assignment")
+
+```
+
+
+```{r}
+# Read data to analyze
+chicago_crimes_2017_to_2022 <- read_csv("chicago_crimes_2017_to_2022.csv")
+head(chicago_crimes_2017_to_2022)
+
+```
+# ASSOCIATION RULES
+
+```{r}
+#chicago_crimes_rules_block <- chicago_crimes_2017_to_2022 %>%
+#  select(`Primary Type`, Arrest, `Location Description`, YearMonth, Nightime, Block) # Block not significant
+
+#chicago_crimes_rules_beat <- chicago_crimes_2017_to_2022 %>%
+#  select(`Primary Type`, Arrest, `Location Description`, YearMonth, Nightime, Beat) # Beat not significant
+
+chicago_crimes_rules_district <- chicago_crimes_2017_to_2022 %>%
+  select(`Primary Type`, Arrest, Year, Month, WeekDay, TimeOfDay, District) # district 011
+
+chicago_crimes_rules_ward <- chicago_crimes_2017_to_2022 %>%
+  select(`Primary Type`, Arrest, Year, Month, WeekDay, TimeOfDay, Ward) # Wards 1, 16, 29, 50
+
+chicago_crimes_rules_community <- chicago_crimes_2017_to_2022 %>%
+  select(`Primary Type`, Arrest, Year, Month, WeekDay, TimeOfDay, `Community Area`) # Communities 1, 25, 45, 77
+
+# Generate association rules
+#rules_block <- apriori(chicago_crimes_rules_block, parameter = list(support = 0.01, confidence = 0.5))
+#rules_beat <- apriori(chicago_crimes_rules_beat, parameter = list(support = 0.01, confidence = 0.5))
+rules_district <- apriori(chicago_crimes_rules_district, parameter = list(support = 0.01, confidence = 0.5))
+rules_ward <- apriori(chicago_crimes_rules_ward, parameter = list(support = 0.01, confidence = 0.5))
+rules_community <- apriori(chicago_crimes_rules_community, parameter = list(support = 0.01, confidence = 0.5))
+
+#inspect(rules_block)
+#inspect(rules_beat)
+#inspect(rules_district)
+#inspect(rules_ward)
+#inspect(rules_community)
+
+rules_all <- unique(union(union(rules_district, rules_ward), rules_community))
+
+inspect(subset(rules_all,confidence>0.5))
+
+```
+```{r}
+
+write.table(as(rules_all, "data.frame"), "data.txt")
+
+
+```
+

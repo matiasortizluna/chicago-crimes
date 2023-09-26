@@ -1,0 +1,355 @@
+---
+title: "Machine Learning Models"
+output: html_notebook
+---
+
+```{r}
+########### Import libraries ########### 
+library(readr) 
+library(dplyr) 
+library(ggplot2) 
+library(tidyverse) 
+library(tidymodels) 
+
+library(caret)
+library(rpart) 
+library(partykit)
+library(randomForest)
+library(e1071)
+library(vip)
+
+library(pROC)
+
+```
+
+```{r}
+########### Read Data ########### 
+
+#Sets the working directory
+setwd("/Users/matiasluna/Library/CloudStorage/OneDrive-UniversidadedoPorto/1 ano/2 semestre/Data MiningII CC4024/Project/datasets")
+getwd()
+
+#Reads the CSV file
+#df <- read_csv("Crimes_2017_to_Present.csv")
+#df <- read_csv("chicago_crimes_clean.csv")
+df <- read_csv("chicago_crimes_2017_2023.csv")
+#df <- read_csv("chicago_crimes_2017_to_2022.csv")
+#df <- read_csv("chicago_crimes_2023.csv")
+head(df)
+names(df)
+```
+
+```{r}
+########### Data Preparation ########### 
+
+#Selects specific columns and exclude others
+df <- df %>% select(-c('ID','Case Number', 'Date','YearMonth','Updated On','UpdateDays', 'Block','IUCR','Description','Location Description'))
+glimpse(df)
+
+#Converts columns to other data types
+df$`FBI Code` <- as.factor(df$`FBI Code`)
+df$`Primary Type` <- as.factor(df$`Primary Type`)
+
+df$`Community Area` <- as.numeric(df$`Community Area`)
+
+df$Beat <- as.numeric(df$Beat)
+df$District <- as.numeric(df$District)
+df$Ward <- as.numeric(df$Ward)
+
+df$Year <- as.numeric(df$Year)
+df$Hour <- as.numeric(df$Hour)
+df$WeekDay <- as.numeric(df$WeekDay)
+df$Month <- as.numeric(df$Month)
+df$Nightime <- as.numeric(df$Nightime)
+
+df$TimeOfDay <- as.factor(df$TimeOfDay)
+df$Season <- as.factor(df$Season)
+
+df$Latitude <- as.numeric(df$Latitude)
+df$Longitude <- as.numeric(df$Longitude)
+
+df$Domestic <- as.numeric(df$Domestic)
+df$Arrest <- as.factor(df$Arrest)
+
+#Rename the columns
+df <- df %>% rename(Primary_Type = `Primary Type`)
+df <- df %>% rename(FBI_Code = `FBI Code`)
+df <- df %>% rename(Community_Area = `Community Area`)
+
+df <- drop_na(df)
+glimpse(df)
+head(df)
+```
+
+```{r}
+########### Data Augmentation ########### 
+df %>% count(Arrest) %>% mutate(prop = n/sum(n))
+
+#Counts the occurrences of each class in the "Arrest" variable.
+aux_class_counts <- table(df$Arrest)
+aux_class_counts
+#Identify the minority class
+aux_minority_class <- names(aux_class_counts)[which.min(aux_class_counts)]
+aux_minority_class
+#Get the indices of the minority class
+aux_minority_indices <- which(df$Arrest == aux_minority_class)
+#Augments the minority class by resampling
+aux_augmented_df <- df
+aux_n_augment <- length(df$Arrest) - 2 * aux_class_counts[aux_minority_class]
+aux_n_augment
+
+aux_augmented_indices <- sample(aux_minority_indices, size = aux_n_augment, replace = TRUE)
+aux_augmented_df <- rbind(aux_augmented_df, df[aux_augmented_indices, ])
+#Checks the data balance after augmentation.
+table(aux_augmented_df$Arrest)
+
+df <- aux_augmented_df
+df %>% count(Arrest) %>% mutate(prop = n/sum(n))
+```
+
+```{r}
+########### Final Data Structure Analysis ########### 
+glimpse(df)
+df <- drop_na(df)
+glimpse(df)
+
+levels(df$Arrest)
+df$Arrest <- relevel(df$Arrest, ref = "TRUE")
+levels(df$Arrest)
+```
+
+```{r}
+########### Data Splitting ########### 
+
+#Splits the data into training and testing datasets.
+set.seed(123)
+df_split <- initial_split(df,prop = 0.7,strata = Arrest)
+# Create training data
+df_train <- df_split %>%training()
+# Create testing data
+df_test <- df_split %>%testing()
+
+#Displays the number of rows in the training and testing datasets.
+nrow(df_train)
+nrow(df_test)
+
+```
+
+```{r}
+########### Linear Regression Approaches: Logistic Regression ########### 
+
+#Definition of a logistic regression model 
+lr_model<- logistic_reg() %>%
+  # Set the engine
+  set_engine("glm") %>%
+  # Set the mode
+  set_mode("classification") %>%
+  # Fit the model with the train data
+  fit(Arrest~., data = df_train)
+tidy(lr_model)
+
+#Make predictions using the model on the test data
+lr_predictions <- predict(lr_model, new_data = df_test, type = "class")
+
+#Prediction of the class
+lr_pred_class <- predict(lr_model,new_data = df_test,type = "class")
+head(lr_pred_class)
+#Prediction of the probabilities
+lr_pred_prob <- predict(lr_model,new_data = df_test,type = "prob")
+head(lr_pred_prob)
+
+########### Linear Regression Approaches: Logistic Regression Result Analysis ########### 
+
+#Calculate the results of the prediction against the actual values
+lr_results <- df_test %>% select(Arrest) %>% bind_cols(lr_pred_class, lr_pred_prob)
+head(lr_results)
+
+#Computes different metrics from the result of the confusion matrix
+lr_statistics <- confusionMatrix(lr_predictions$.pred_class, df_test$Arrest)
+lr_metrics <- NA
+lr_metrics$kappa <- lr_statistics$overall['Kappa']
+lr_metrics$accuracy <- lr_statistics$overall['Accuracy']
+lr_metrics$sensitivity <- lr_statistics$byClass['Sensitivity']
+lr_metrics$specificity <- lr_statistics$byClass['Specificity']
+lr_metrics$precision <- lr_statistics$byClass['Precision']
+lr_metrics$recall <- lr_statistics$byClass['Recall']
+lr_metrics$f_measure <- lr_statistics$byClass['F1']
+lr_metrics$cm <- lr_statistics$table
+
+#Creates a ROC curve and the AUC value.
+lr_metrics$roc_auc <- roc_auc(lr_results,truth = Arrest,.pred_TRUE)
+lr_metrics$roc_auc <- lr_metrics$roc_auc$.estimate
+lr_results %>% roc_curve(truth = Arrest, .pred_TRUE) %>% autoplot()
+
+```
+
+```{r}
+########### Logical Approaches: Tree-based Models: CART (Classification and Regression Trees) ###########
+
+#Definition of a CART model with the train data
+cart_model <- rpart(Arrest ~ ., data = df_train)
+plot(cart_model)
+text(cart_model)
+#Make predictions using the model on the test data
+cart_predictions <- predict(cart_model, newdata = df_test, type = "class")
+
+#Prediction of the class
+cart_pred_class <- predict(cart_model, newdata = df_test, type = "class")
+head(cart_pred_class)
+#Prediction of the probabilities
+cart_pred_prob <- predict(cart_model, newdata = df_test, type = "prob")
+head(cart_pred_prob)
+
+########### Logical Approaches: Tree-based Models: CART (Classification and Regression Trees) Result Analysis ########### 
+
+#Calculate the results of the prediction against the actual values
+cart_results <- df_test %>% select(Arrest) %>% bind_cols(.pred_class = as.factor(cart_pred_class),as.data.frame(cart_pred_prob))
+head(cart_results)
+
+#Computes different metrics from the result of the confusion matrix
+cart_statistics <- confusionMatrix(cart_results$.pred_class, df_test$Arrest)
+cart_metrics <- NA
+cart_metrics$kappa <- cart_statistics$overall['Kappa']
+cart_metrics$accuracy <- cart_statistics$overall['Accuracy']
+cart_metrics$sensitivity <- cart_statistics$byClass['Sensitivity']
+cart_metrics$specificity <- cart_statistics$byClass['Specificity']
+cart_metrics$precision <- cart_statistics$byClass['Precision']
+cart_metrics$recall <- cart_statistics$byClass['Recall']
+cart_metrics$f_measure <- cart_statistics$byClass['F1']
+cart_metrics$cm <- cart_statistics$table
+
+#Creates a ROC curve and the AUC value.
+cart_metrics$roc_auc <- roc_auc(cart_results,truth = Arrest,`TRUE`)
+cart_metrics$roc_auc <- cart_metrics$roc_auc$.estimate
+cart_results %>% roc_curve(truth = Arrest, `TRUE`) %>% autoplot()
+```
+
+```{r}
+########### Ensemble Approaches: Random Forests: ###########
+
+#Definition of a random forest model with the train data
+rf_model <- randomForest(Arrest ~ .,data = df_train,ntree = 100)
+rf_model
+plot(rf_model)
+#Make predictions using the model on the test data
+rf_predictions <- predict(rf_model, newdata = df_test, type = "class")
+
+#Prediction of the class
+rf_pred_class <- predict(rf_model, newdata = df_test, type = "class")
+head(rf_pred_class)
+
+#Prediction of the probabilities
+rf_pred_prob <- predict(rf_model, newdata = df_test, type = "prob")
+# Display the first few predicted class probabilities.
+head(rf_pred_prob)
+
+########### Ensemble Approaches: Random Forests: Result Analysis ########### 
+
+#Calculate the results of the prediction against the actual values
+rf_results <- df_test %>% select(Arrest) %>% bind_cols(rf_pred_class, rf_pred_prob)
+head(rf_results)
+
+#Computes different metrics from the result of the confusion matrix
+rf_statistics <- confusionMatrix(rf_predictions, df_test$Arrest)
+rf_metrics <- NA
+rf_metrics$kappa <- rf_statistics$overall['Kappa']
+rf_metrics$accuracy <- rf_statistics$overall['Accuracy']
+rf_metrics$sensitivity <- rf_statistics$byClass['Sensitivity']
+rf_metrics$specificity <- rf_statistics$byClass['Specificity']
+rf_metrics$precision <- rf_statistics$byClass['Precision']
+rf_metrics$recall <- rf_statistics$byClass['Recall']
+rf_metrics$f_measure <- rf_statistics$byClass['F1']
+rf_metrics$cm <- rf_statistics$table
+
+#Creates a ROC curve and the AUC value.
+rf_metrics$roc_auc <- roc_auc(cart_results,truth = Arrest,`TRUE`)
+rf_metrics$roc_auc <- rf_metrics$roc_auc$.estimate
+rf_results %>% roc_curve(truth = Arrest, `TRUE`) %>% autoplot()
+
+```
+
+```{r}
+########### Probabilistic Approaches: Naive Bayes ########### 
+#Definition of a Naive Bayes model with train data
+nb_model <- naiveBayes(Arrest ~ ., data = df_train)
+nb_model
+#Make predictions using the model on the test data
+nb_predictions <- predict(nb_model, newdata = df_test, type = "class")
+
+#Prediction of the class
+nb_pred_class<- predict(nb_model, newdata = df_test, type = "class")
+head(nb_pred_class)
+
+#Prediction of the probabilities
+nb_pred_prob <- predict(nb_model, newdata = df_test, type = "raw")
+head(nb_pred_prob)
+
+########### Probabilistic Approaches: Naive Bayes: Result Analysis ########### 
+
+#Calculate the results of the prediction against the actual values
+nb_results <- df_test %>% select(Arrest) %>% bind_cols(nb_pred_class, nb_pred_prob)
+head(nb_results)
+
+#Computes different metrics from the result of the confusion matrix
+nb_statistics <- confusionMatrix(nb_predictions, df_test$Arrest)
+nb_metrics <- NA
+nb_metrics$kappa <- nb_statistics$overall['Kappa']
+nb_metrics$accuracy <- nb_statistics$overall['Accuracy']
+nb_metrics$sensitivity <- nb_statistics$byClass['Sensitivity']
+nb_metrics$specificity <- nb_statistics$byClass['Specificity']
+nb_metrics$precision <- nb_statistics$byClass['Precision']
+nb_metrics$recall <- nb_statistics$byClass['Recall']
+nb_metrics$f_measure <- nb_statistics$byClass['F1']
+nb_metrics$cm <- nb_statistics$table
+
+#Creates a ROC curve and the AUC value.
+nb_metrics$roc_auc <- roc_auc(cart_results,truth = Arrest,`TRUE`)
+nb_metrics$roc_auc <- nb_metrics$roc_auc$.estimate
+nb_results %>% roc_curve(truth = Arrest, `TRUE`) %>% autoplot()
+
+```
+
+```{r}
+########### Compare models ########### 
+
+# Logistic Regression ROC curve
+lr_auc <- roc(df_test$Arrest, lr_pred_prob$.pred_TRUE)
+
+# CART ROC curve
+cart_auc <- roc(df_test$Arrest, as.numeric(cart_pred_prob[, "TRUE"]))
+
+# Random Forests ROC curve
+rf_auc <- roc(df_test$Arrest, rf_pred_prob[, "TRUE"])
+
+# Naive Bayes ROC curve
+nb_auc <- roc(df_test$Arrest, nb_pred_prob[, "TRUE"])
+
+# Plotting ROC curves
+plot(lr_auc, col = "blue", main = "ROC Curves of Four Models")
+lines(cart_auc, col = "red")
+lines(rf_auc, col = "green")
+lines(nb_auc, col = "orange")
+
+legend("bottomright", legend = c("Logistic Regression", "CART", "Random Forests", "Naive Bayes"),
+       col = c("blue", "red", "green", "orange"), lty = 1)
+
+
+```
+
+```{r}
+########### Importance of features ########### 
+
+feature_importance <- NA
+
+#Calculate feature importance
+feature_importance$lr <- vi(lr_model)
+feature_importance$cart <- vi(cart_model)
+feature_importance$rf <- vi(rf_model)
+#feature_importance$nb <- vi(nb_model) Not available for this model
+
+#Visualize feature importance
+vip(feature_importance$lr,num_features=15)
+vip(feature_importance$cart,num_features=15)
+vip(feature_importance$rf,num_features=15)
+
+```

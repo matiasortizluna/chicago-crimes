@@ -1,0 +1,1437 @@
+---
+title: "Assignment - Data Mining II"
+output: html_notebook
+date: "2023-05-26"
+---
+
+# EXPLORATORY DATA ANALYSIS
+
+```{r}
+
+#exploratory data analysis:
+#question a lot and then answer
+#e.g. which crimes occur the most or the least (primary type of the crime)
+# where do they occur 
+# at what period of the day/week/year
+# do they lead to an arrest
+
+```
+
+```{r}
+
+## -- Import libraries -------
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(arules)
+library(hydroTSM)
+library(geosphere)
+library(recommenderlab)
+library(readr)
+#library(tidymodels)
+#library(base)
+#library(remotes)
+#library(caret)
+
+## -- Set directory -------
+setwd("D:/Filipa/Documents/CompSci/DataMiningII/Assignment")
+
+```
+
+```{r}
+
+## -- Reading and basic cleaning -------
+
+# Read the dataset
+chicago_crimes <- read_csv("Crimes___2017_to_Present.csv")
+
+# Remove rows with NA or empty values
+chicago_crimes_clean <- chicago_crimes %>% drop_na()
+
+# Preview the first few rows of the cleaned dataset
+head(chicago_crimes_clean)
+
+# Write the cleaned dataset to a CSV file
+write_csv(chicago_crimes_clean, "chicago_crimes_clean.csv")
+
+```
+
+
+```{r}
+
+chicago_crimes_clean <- read_csv("chicago_crimes_clean.csv")
+
+# Convert date and extract year-month and hour
+# Added: Month, Hour, WeekDay, UpdtateDays(number of days from the crime until the update), and Nightime
+
+chicago_crimes_clean <- chicago_crimes_clean %>%
+  mutate(Date = as.POSIXct(Date, format = "%Y-%m-%d %H:%M:%S"),
+         Hour = hour(floor_date(Date, "hour")),
+         Date = as.Date(Date)) %>%
+  mutate(WeekDay = wday(Date)) %>%
+  mutate(`Updated On` = as.POSIXct(`Updated On`, format = "%m/%d/%Y %I:%M:%S %p"),
+         `Updated On` = as.Date(`Updated On`),
+         UpdateDays = difftime(`Updated On`, Date, units = "days")) %>%
+  mutate(YearMonth = floor_date(Date, "month")) %>%
+  mutate(Month = format(as.Date(Date, format="%Y-%m-%d %H:%M:%S"),"%m")) %>%
+  mutate(Nightime = if_else(Hour < 6 | Hour >= 21, "True", "False")) %>%
+  mutate(TimeOfDay = if_else(Hour >= 6 & Hour < 12, "Morning", if_else(Hour >= 12 & Hour < 16, "Afternoon", if_else(Hour >=16 & Hour < 20, "Evening", "Night")))) %>%
+  mutate(Season = time2season(Date, out.fmt = "seasons")) %>%
+  filter(YearMonth != ym("2023-04"))
+
+# Replace "CRIM SEXUAL ASSAULT" with "CRIMINAL SEXUAL ASSAULT" in "Primary Type"
+chicago_crimes_clean <- chicago_crimes_clean %>%
+  mutate(`Primary Type` = if_else(`Primary Type` == "CRIM SEXUAL ASSAULT",
+                                  "CRIMINAL SEXUAL ASSAULT",
+                                  `Primary Type`))
+
+# Set to perform EDA
+chicago_crimes_2017_to_2022 <- chicago_crimes_clean %>%
+  filter(YearMonth >= ym("2017-01") & YearMonth <= ym("2022-12"))
+
+# Hidden Set
+chicago_crimes_2023 <- chicago_crimes_clean %>%
+  filter(YearMonth >= ym("2023-01") & YearMonth <= ym("2023-03"))
+
+write_csv(chicago_crimes_2017_to_2022, "chicago_crimes_2017_to_2022.csv")
+write_csv(chicago_crimes_2023, "chicago_crimes_2023.csv")
+
+# See attributes
+names(chicago_crimes_2017_to_2022)
+
+# We dropped april 2023, because there´s not enough data
+# We save jan, fev and mar 2023 for later use: it will be the hidden set, we use it after the modelling
+# We will do the analysis with the previous months of 2017 to 2022. This set will also be used for the modelling part and will be divided into train and test
+
+```
+
+```{r}
+# Read data to analyze
+chicago_crimes_2017_to_2022 <- read_csv("chicago_crimes_2017_to_2022.csv")
+head(chicago_crimes_2017_to_2022)
+
+```
+
+
+```{r}
+
+# EVOLUTION OF CRIMES IN CHICAGO
+
+chicago_crimes_monthly <- chicago_crimes_2017_to_2022 %>%
+  group_by(YearMonth) %>%
+  summarize(count = n())
+
+start_date <- min(chicago_crimes_2017_to_2022$YearMonth)
+end_date <- max(chicago_crimes_2017_to_2022$YearMonth)
+month_labels <- seq(from = start_date, to = end_date, by = "2 month")
+
+# Create the plot
+ggplot(chicago_crimes_monthly, aes(x = YearMonth, y = count)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Evolution of Crimes in Chicago",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))
+  
+# interesting to consider:
+# april 2020 -> Cessation of Alcoholic Liquor Sales 
+#           -> Stay-at-Home Executive Order
+# february 2021 -> Cessation of Alcoholic Liquor Sales 
+#              -> Stay-at-Home Advisory
+# november 2020 -> also had these orders, but did not affect the crime count
+# Julho de 2019 ->  final da Copa América de 2019 (pico alto de crime)
+# Investigate more
+```
+
+```{r}
+# EVOLUTION OF CRIMES IN CHICAGO (with highlighted dates)
+
+# Define the date for the vertical line
+date1 <- as.Date("2020-03-01")
+date2 <- as.Date("2021-02-01")
+
+# Create the plot
+ggplot(chicago_crimes_monthly, aes(x = YearMonth, y = count)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Evolution of Crimes in Chicago",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4)) +
+  geom_vline(xintercept = as.numeric(date1), color = "#FB8072", linetype = "dashed") +
+  geom_vline(xintercept = as.numeric(date2), color = "#FB8072", linetype = "dashed")
+
+```
+```{r}
+# EVOLUTION OF CRIMES IN CHICAGO (by type) (same plot)
+
+# Get the top 10 primary types by count
+top_primary_types <- chicago_crimes_2017_to_2022 %>%
+  group_by(`Primary Type`) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count)) %>%
+  slice_head(n = 10) %>%
+  pull(`Primary Type`)
+
+# Filter the data to include only the top 10 primary types
+chicago_crimes_type_monthly <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(YearMonth, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = fct_reorder(`Primary Type`, count, .desc = TRUE))
+
+# Create the plot
+ggplot(chicago_crimes_type_monthly, aes(x = YearMonth, y = count, color = `Primary Type`)) +
+  geom_line(size=0.5) +
+  geom_point(size=1) +
+  labs(title = "Evolution of Crimes by Most Significant Types",
+       x = "Month",
+       y = "Crime Count") +
+  scale_color_brewer(palette = "Paired") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))
+
+
+
+```
+
+```{r}
+# EVOLUTION OF DECEPTIVE PRACTICE, NARCOTICS AND GTA IN CHICAGO
+
+evolution_types <- c('DECEPTIVE PRACTICE', 'NARCOTICS', 'MOTOR VEHICLE THEFT')
+
+chicago_crimes_evol_monthly <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% evolution_types) %>%
+  group_by(YearMonth, `Primary Type`) %>%
+  summarize(count = n())
+
+colors <- c("#8DD3C7", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69", "#FCCDE5", "#D9D9D9", "#BC80BD")
+selected_colors <- colors[c(1, 4, 10)]
+
+# Create the plot
+ggplot(chicago_crimes_evol_monthly, aes(x = YearMonth, y = count, color = `Primary Type`)) +
+  geom_line(size=0.5) +
+  geom_point(size=1) +
+  labs(title = "Evolution of Crimes",
+       x = "Month",
+       y = "Crime Count") +
+  scale_color_manual(values = selected_colors) +  # Use the selected colors
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom")
+
+
+```
+
+
+```{r}
+# EVOLUTION OF DECEPTIVE PRACTICE IN CHICAGO
+
+chicago_crimes_dp_monthly <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "DECEPTIVE PRACTICE") %>%
+  group_by(YearMonth, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_dp_monthly, aes(x = YearMonth, y = count)) +
+  geom_line(size=0.5) +
+  geom_point(size=1) +
+  labs(title = "Evolution of Deceptive Practice",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  scale_color_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+```
+
+```{r}
+# EVOLUTION OF MOTOR VEHICLE THEFT IN CHICAGO
+
+chicago_crimes_gta_monthly <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "MOTOR VEHICLE THEFT") %>%
+  group_by(YearMonth, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_gta_monthly, aes(x = YearMonth, y = count)) +
+  geom_line(size=0.5) +
+  geom_point(size=1) +
+  labs(title = "Evolution of Motor Vehicle Theft",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  scale_color_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+
+#after the pandemic, there is a high demand of car parts, but low supply
+
+```
+
+```{r}
+# EVOLUTION OF NARCOTICS IN CHICAGO
+
+chicago_crimes_narcos_monthly <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "NARCOTICS") %>%
+  group_by(YearMonth, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_narcos_monthly, aes(x = YearMonth, y = count)) +
+  geom_line(size=0.5) +
+  geom_point(size=1) +
+  labs(title = "Evolution of Narcotics",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  scale_color_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+```
+
+
+```{r}
+# EVOLUTION OF CRIMES IN CHICAGO (by type) (different plots)
+
+chicago_crimes_monthly_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(YearMonth, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = fct_reorder(`Primary Type`, count, .desc = TRUE))
+
+# Create a line plot with facets for primary type
+ggplot(chicago_crimes_monthly_type, aes(x = YearMonth, y = count, color = `Primary Type`)) +
+  geom_line(size=0.5) +
+  geom_point(size=0.5) +
+  labs(title = "Evolution of Crimes in Chicago by Primary Type",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  scale_color_brewer(palette = "Paired") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none") +
+  geom_vline(xintercept = as.numeric(date1), color = "red", linetype = "dashed") +
+  facet_wrap(~ `Primary Type`, ncol = 2)
+
+```
+
+
+```{r}
+# EVOLUTION OF CRIMES IN CHICAGO (on ward 42)
+
+chicago_crimes_ward_42_monthly <- chicago_crimes_2017_to_2022 %>%
+  filter(Ward == 42) %>%
+  group_by(YearMonth) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_ward_42_monthly, aes(x = YearMonth, y = count)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Evolution of Crimes in Ward 42",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))
+
+# august is a prevalent month
+
+# do for more wards
+
+```
+
+
+```{r}
+
+# EVOLUTION OF CRIMES IN CHICAGO (by arrest status)
+
+chicago_crimes_arrest_monthly <- chicago_crimes_2017_to_2022 %>%
+  group_by(YearMonth, Arrest) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_arrest_monthly, aes(x = YearMonth, y = count, color = Arrest)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Evolution of Crimes in Chicago by Arrest Status",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))   +
+  guides(color = guide_legend(reverse = TRUE))
+
+# The graphic where the part is true is equal to narcotics shape
+
+```
+
+```{r}
+
+# EVOLUTION OF CRIMES IN CHICAGO (by domestic status)
+
+chicago_crimes_domestic_monthly <- chicago_crimes_2017_to_2022 %>%
+  group_by(YearMonth, Domestic) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_domestic_monthly, aes(x = YearMonth, y = count, color = Domestic)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Evolution of Crimes in Chicago by Domestic Status",
+       x = "Month",
+       y = "Crime Count") +
+  scale_x_date(breaks = month_labels, labels = scales::date_format("%Y-%m")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))   +
+  guides(color = guide_legend(reverse = TRUE))
+
+# Domestic Crimes stay the same, but not domestic dropped during covid
+
+```
+
+
+```{r}
+
+# NUMBER OF CRIMES PER TYPE
+
+chicago_crimes_type <- chicago_crimes_2017_to_2022 %>%
+  group_by(`Primary Type`) %>% 
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = reorder(`Primary Type`, -count))
+
+# Create the plot
+ggplot(chicago_crimes_type, aes(x = `Primary Type`, y = count, fill=`Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1)) +
+  labs(x = "Primary Type", y = "Crime Count", title = "Number of Crimes per Type in Chicago") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")  +
+  geom_hline(yintercept = 50000, color = "black", linetype = "dashed") + coord_flip()
+
+```
+
+```{r}
+# NUMBER OF CRIMES PER MOST SIGNIFICANT TYPE
+
+chicago_crimes_type_top10 <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(`Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = reorder(`Primary Type`, -count))
+
+# Create the plot
+ggplot(chicago_crimes_type_top10, aes(x = `Primary Type`, y = count, fill=`Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1)) +
+  labs(x = "Primary Type", y = "Crime Count", title = "Most Significant Crime Types") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none") + coord_flip()
+```
+
+```{r}
+# NUMBER OF CRIMES PER MOST SIGNIFICANT OTHER OFFENSES
+top_other_offenses <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "OTHER OFFENSE") %>%
+  count(Description) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 5) %>%
+  pull(Description)
+
+chicago_crimes_other_top5 <- chicago_crimes_2017_to_2022 %>%
+  filter(Description %in% top_other_offenses) %>%
+  group_by(Description) %>%
+  summarize(count = n()) %>%
+  mutate(Description = reorder(Description, -count))
+
+# Create the plot
+ggplot(chicago_crimes_other_top5, aes(x = Description, y = count, fill=Description)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1)) +
+  labs(x = "Description", y = "Crime Count", title = "Most Prevalent Other Offenses in Chicago") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none") + coord_flip()
+```
+
+```{r}
+# DESCRIPTION OF NARCOTIC CRIMES
+top_narcotics <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "NARCOTICS") %>%
+  count(Description) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(Description)
+
+top_wards <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "NARCOTICS") %>%
+  count(Ward) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 3) %>%
+  pull(Ward)
+
+chicago_crimes_narcotics_descrip <- chicago_crimes_2017_to_2022 %>%
+  filter(Description %in% top_narcotics) %>%
+  filter(Ward %in% top_wards) %>%
+  group_by(Description, Ward) %>%
+  summarize(count = n())
+
+chicago_crimes_narcotics_descrip$Ward <- as.factor(chicago_crimes_narcotics_descrip$Ward)
+
+# Create the plot
+ggplot(chicago_crimes_narcotics_descrip, aes(x = reorder(Description, -count), y = count, fill = Ward)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Description", y = "Crime Count", title = "Most Prevalent Narcotic Descriptions by Most Significant Wards") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4)) + coord_flip()
+```
+
+```{r}
+# LOCATION DESCRIPTION OF NARCOTIC CRIMES
+top_narcotics <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "NARCOTICS") %>%
+  count(`Location Description`) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(`Location Description`)
+
+top_wards <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "NARCOTICS") %>%
+  count(Ward) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 3) %>%
+  pull(Ward)
+
+chicago_crimes_narcotics_descrip <- chicago_crimes_2017_to_2022 %>%
+  filter(`Location Description` %in% top_narcotics) %>%
+  filter(Ward %in% top_wards) %>%
+  group_by(`Location Description`, Ward) %>%
+  summarize(count = n())
+
+chicago_crimes_narcotics_descrip$Ward <- as.factor(chicago_crimes_narcotics_descrip$Ward)
+
+# Create the plot
+ggplot(chicago_crimes_narcotics_descrip, aes(x = reorder(`Location Description`, -count), y = count, fill = Ward)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Location", y = "Crime Count", title = "Most Prevalent Narcotic Locations by Wards") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4)) + coord_flip()
+```
+
+```{r}
+# LOCATION DESCRIPTION OF CRIMES THAT LEAD TO ARREST
+top_arrest <- chicago_crimes_2017_to_2022 %>%
+  filter(Arrest == TRUE) %>%
+  count(`Location Description`) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(`Location Description`)
+
+top_wards <- chicago_crimes_2017_to_2022 %>%
+  filter(Arrest == TRUE) %>%
+  count(Ward) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 3) %>%
+  pull(Ward)
+
+chicago_crimes_arrest_descrip <- chicago_crimes_2017_to_2022 %>%
+  filter(`Location Description` %in% top_arrest) %>%
+  filter(Ward %in% top_wards) %>%
+  group_by(`Location Description`, Ward) %>%
+  summarize(count = n())
+
+chicago_crimes_arrest_descrip$Ward <- as.factor(chicago_crimes_arrest_descrip$Ward)
+
+# Create the plot
+ggplot(chicago_crimes_arrest_descrip, aes(x = reorder(`Location Description`, -count), y = count, fill = Ward)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Location", y = "Crime Count", title = "Most Prevalent Arrest Locations by Wards") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4)) + coord_flip()
+```
+
+```{r}
+# LOCATION DESCRIPTION OF THEFT CRIMES
+top_theft <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "THEFT") %>%
+  count(`Location Description`) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(`Location Description`)
+
+top_wards <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "THEFT") %>%
+  count(Ward) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(Ward)
+
+chicago_crimes_narcotics_descrip <- chicago_crimes_2017_to_2022 %>%
+  filter(`Location Description` %in% top_theft) %>%
+  filter(Ward %in% top_wards) %>%
+  group_by(`Location Description`, Ward) %>%
+  summarize(count = n())
+
+chicago_crimes_narcotics_descrip$Ward <- as.factor(chicago_crimes_narcotics_descrip$Ward)
+
+# Create the plot
+ggplot(chicago_crimes_narcotics_descrip, aes(x = reorder(`Location Description`, -count), y = count, fill = Ward)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Location", y = "Crime Count", title = "Most Prevalent Theft Locations by Wards") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4)) + coord_flip()
+```
+
+
+```{r}
+# DISTRIBUTION OF CRIME PER WARD
+chicago_crimes_wards_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(Ward, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_wards_type, aes(x = reorder(Ward, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Ward", y = "Crime Count", title = "Type of Crime per Chicago Ward") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+
+```
+```{r}
+# DISTRIBUTION OF CRIME PER WARD
+
+# Create the plot
+
+ggplot(chicago_crimes_wards_type, aes(x = reorder(Ward, -count), y = prop, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Ward", y = "Proportion of Crimes", title = "Type of Crime per Chicago Ward") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+
+
+
+```
+
+
+
+```{r}
+# DISTRIBUTION OF CRIME PER WARD
+
+# Create the plot
+ggplot(chicago_crimes_wards_type, aes(x = Ward, y = prop, fill = `Primary Type`)) +
+  geom_col(position = "stack") +
+  facet_wrap(~ `Primary Type`, ncol= 2, scales = "free_y") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Ward", y = "Proportion of Crimes", title = "Type of Crime per Chicago Ward") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+
+```
+
+```{r}
+# DISTRIBUTION OF CRIME PER COMMUNITIES OF WARD 42
+chicago_crimes_beats_ward42_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  filter(Ward == "42") %>%
+  group_by(`Community Area`, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_beats_ward42_type, aes(x = reorder(`Community Area`, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Community Area", y = "Crime Count", title = "Type of Crime per Community of Ward 42") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF CRIME PER COMMUNITIES OF WARD 24
+chicago_crimes_beats_ward24_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  filter(Ward == "24") %>%
+  group_by(`Community Area`, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_beats_ward24_type, aes(x = reorder(`Community Area`, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Community Area", y = "Crime Count", title = "Type of Crime per Community of Ward 24") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF CRIME PER COMMUNITIES OF WARD 27
+chicago_crimes_beats_ward27_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  filter(Ward == "27") %>%
+  group_by(`Community Area`, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_beats_ward27_type, aes(x = reorder(`Community Area`, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Community Area", y = "Crime Count", title = "Type of Crime per Community of Ward 27") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF CRIME PER COMMUNITIES OF WARD 28
+chicago_crimes_beats_ward28_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  filter(Ward == "28") %>%
+  group_by(`Community Area`, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_beats_ward28_type, aes(x = reorder(`Community Area`, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Community Area", y = "Crime Count", title = "Type of Crime per Community of Ward 28") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# ARREST STATUS PER MOST SIGNIFICANT PRIMARY TYPE
+
+chicago_crimes_arrests_type_top10 <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%  
+  group_by(`Primary Type`, Arrest) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_arrests_type_top10, aes(x = `Primary Type`, y = prop, fill = Arrest)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Primary Types of Crime by Arrest Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) + 
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed")  + coord_flip()
+
+
+```
+
+```{r}
+# ARREST STATUS PER PRIMARY TYPE
+
+chicago_crimes_arrests_type <- chicago_crimes_2017_to_2022 %>%
+  group_by(`Primary Type`, Arrest) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count)) 
+
+# Create the plot
+ggplot(chicago_crimes_arrests_type, aes(x = `Primary Type`, y = prop, fill = Arrest)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Primary Types of Crime by Arrest Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed") + coord_flip()
+
+
+```
+
+```{r}
+
+
+# Filter the data
+filtered_data <- chicago_crimes_2017_to_2022 %>%
+  group_by(`Primary Type`, Arrest) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count)) %>%
+  filter(`Primary Type` %in% filter(chicago_crimes_arrests_type, Arrest == TRUE, prop > 0.5)$`Primary Type`)
+
+colors <- c("#8DD3C7", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69", "#FCCDE5", "#D9D9D9", "#BC80BD")
+selected_colors <- colors[c(4,5)]
+
+# Create the plot
+ggplot(filtered_data, aes(x = `Primary Type`, y = prop, fill = Arrest)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Types that Lead to Higher Arrest") +
+  scale_fill_manual(values = selected_colors) +  # Use the selected colors
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4)) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.9, color = "black", linetype = "dashed") +
+  coord_flip()
+
+
+```
+
+```{r}
+# ARREST STATUS PER MOST SIGNIFICANT OTHER OFFENSES
+
+chicago_crimes_arrest_other_top5 <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "OTHER OFFENSE") %>%
+  filter(Description %in% top_other_offenses) %>%
+  group_by(Description, Arrest) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_arrest_other_top5, aes(x = Description, y = prop, fill = Arrest)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Top 10 Other Offenses by Arrest Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed") + coord_flip()
+
+```
+
+```{r}
+# DOMESTIC STATUS PER MOST SIGNIFICANT PRIMARY TYPE
+
+chicago_crimes_domestic_type_top10 <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%  
+  group_by(`Primary Type`, Domestic) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_domestic_type_top10, aes(x = `Primary Type`, y = prop, fill = Domestic)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Primary Types of Crime by Domestic Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed")  + coord_flip()
+
+```
+
+```{r}
+# DOMESTIC STATUS PER PRIMARY TYPE
+
+chicago_crimes_domestic_type <- chicago_crimes_2017_to_2022 %>%
+  group_by(`Primary Type`, Domestic) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_domestic_type, aes(x = `Primary Type`, y = prop, fill = Domestic)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Primary Types of Crime by Domestic Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed")  + coord_flip()
+
+
+```
+
+```{r}
+# DOMESTIC STATUS PER MOST SIGNIFICANT OTHER OFFENSES
+
+chicago_crimes_domestic_other_top5 <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` == "OTHER OFFENSE") %>%
+  filter(Description %in% top_other_offenses) %>%
+  group_by(Description, Domestic) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_domestic_other_top5, aes(x = Description, y = prop, fill = Domestic)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Other Offenses by Domestic Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed")  + coord_flip()
+
+
+```
+
+
+```{r}
+
+# DISTRIBUTION OF CRIME PER YEAR
+
+chicago_crimes_byYear <- chicago_crimes_2017_to_2022 %>%
+  group_by(Year) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_byYear, aes(x = Year, y = count)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1)) +
+  labs(x = "Year", y = "Crime Count", title = "Crimes by Year") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+
+```
+
+```{r}
+
+# MOST SIGNIFICANT PRIMARY TYPE BY YEAR
+
+chicago_crimes_type_year <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(Year, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = fct_reorder(`Primary Type`, count, .desc = TRUE))
+
+# Create the plot
+ggplot(chicago_crimes_type_year, aes(x = Year, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Year", y = "Crime Count", title = "Type of Crime per Year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF SERIOUS CRIMES PER YEAR
+
+#crimes_types <- chicago_crimes_2017_to_2022 %>% select(`Primary Type`)
+#crimes_types <- unique(crimes_types)
+
+serious_crimes <- c('CRIMINAL SEXUAL ASSAULT', 'PROSTITUTION', 'KIDNAPPING', 'HOMICIDE', 'HUMAN TRAFFICKING')
+
+chicago_serious_crimes_year <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% serious_crimes) %>%
+  group_by(Year, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_serious_crimes_year, aes(x = Year, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Year", y = "Crime Count", title = "Serious crimes per year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTIRBUTION OF CRIME PER SEASON
+
+chicago_crimes_season <- chicago_crimes_2017_to_2022 %>%
+  group_by(Season) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_season, aes(x = Season, y = count)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1)) +
+  labs(x = "Seasons", y = "Crime Count", title = "Crimes by Season") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+```
+
+```{r}
+# MOST SIGNIFICANT PRIMARY TYPE BY SEASON
+
+chicago_crimes_type_season <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(Season, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = fct_reorder(`Primary Type`, count, .desc = TRUE))
+
+# Create the plot
+ggplot(chicago_crimes_type_season, aes(x = reorder(Season, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Season", y = "Crime Count", title = "Type of Crime per Season") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF SERIOUS CRIMES PER SEASON
+
+chicago_serious_crimes_season <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% serious_crimes) %>%
+  group_by(Season, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_serious_crimes_season, aes(x = reorder(Season, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Month", y = "Crime Count", title = "Serious crimes per month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+
+# DISTRIBUTION OF CRIME PER MONTH
+
+chicago_crimes_byMonth <- chicago_crimes_2017_to_2022 %>%
+  group_by(Month) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_byMonth, aes(x = Month, y = count)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1))  +
+  labs(x = "Month", y = "Crime Count", title = "Crimes by Month") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+
+```
+
+```{r}
+
+# MOST SIGNIFICANT PRIMARY TYPE BY MONTH
+
+chicago_crimes_type_month <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(Month, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = fct_reorder(`Primary Type`, count, .desc = TRUE))
+
+# Create the plot
+ggplot(chicago_crimes_type_month, aes(x = Month, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Month", y = "Crime Count", title = "Type of Crime per Month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF SERIOUS CRIMES PER MONTH
+
+chicago_serious_crimes_month <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% serious_crimes) %>%
+  group_by(Month, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_serious_crimes_month, aes(x = Month, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Month", y = "Crime Count", title = "Serious crimes per month") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF CRIME PER TIME OF THE DAY
+
+chicago_crimes_timeOfDay <- chicago_crimes_2017_to_2022 %>%
+  group_by(TimeOfDay) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_timeOfDay, aes(x = TimeOfDay, y = count)) +
+  geom_bar(stat = "identity", width = 0.8, position = position_dodge(width = 1)) +
+  labs(x = "TimeOfDay", y = "Crime Count", title = "Crimes by TimeOfDay") +
+  scale_fill_brewer(palette = "Set3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "none")
+```
+
+
+```{r}
+# DISTRIBUTION OF MOST SIGNIFICANT TYPES PER TIME OF THE DAY
+
+chicago_crimes_type_timeOfDay <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(TimeOfDay, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(`Primary Type` = fct_reorder(`Primary Type`, count, .desc = TRUE))
+
+# Create the plot
+ggplot(chicago_crimes_type_timeOfDay, aes(x = reorder(TimeOfDay, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "TimeOfDay", y = "Crime Count", title = "Type of Crime per TimeOfDay") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# DISTRIBUTION OF SERIOUS CRIMES PER TIME OF DAY
+
+chicago_serious_crimes_timeOfDay <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% serious_crimes) %>%
+  group_by(TimeOfDay, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_serious_crimes_timeOfDay, aes(x = reorder(TimeOfDay, -count), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "TimeOfDay", y = "Crime Count", title = "Serious crimes per TimeOfDay") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+
+```{r}
+# Create the plot
+ggplot(chicago_serious_crimes_timeOfDay, aes(x = TimeOfDay, y = count, color = `Primary Type`)) +
+  geom_line(size=0.5) +
+  geom_point(size=1) +
+  labs(title = "Serious crimes per TimeOfDay",
+       x = "TimeOfDay",
+       y = "Crime Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))
+```
+
+
+```{r}
+
+# DISTRIBUTION OF CRIME PER HOUR
+
+chicago_crimes_hour_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(Hour, `Primary Type`) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_hour_type, aes(x = Hour, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Hour", y = "Crime Count", title = "Type of Crime per Hour of the Day") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) +
+  scale_x_continuous(breaks = seq(0, 23, 1))
+
+
+
+
+```
+
+```{r}
+
+# DISTRIBUTION OF ARREST STATUS PER HOUR
+
+chicago_crimes_hour_arrest <- chicago_crimes_2017_to_2022 %>%
+  group_by(Hour, Arrest) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_hour_arrest, aes(x = Hour, y = count, fill = Arrest)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Hour", y = "Crime Count", title = "Arrest Status per Hour of the Day") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) +
+  scale_x_continuous(breaks = seq(0, 23, 1))
+
+
+
+
+```
+
+```{r}
+
+# DISTRIBUTION OF CRIME PER HOUR
+
+# Create the plot
+ggplot(chicago_crimes_hour_type, aes(x = Hour, y = prop, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Hour", y = "Proportion of Crimes", title = "Type of Crime per Hour of the Day") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) +
+  scale_x_continuous(breaks = seq(0, 23, 1))
+
+
+
+
+```
+
+
+```{r}
+
+# DISTRIBUTION OF CRIME PER HOUR (translated)
+
+# Create the plot
+ggplot(chicago_crimes_hour_type, aes(x = ifelse(Hour >= 6, Hour - 6, Hour + 18), y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Hour", y = "Crime Count", title = "Type of Crime per Hour of the Day") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) +
+  scale_x_continuous(breaks = c(0:5, 6:23), labels = c(6:23, 0:5))
+
+
+
+```
+
+
+```{r}
+# NIGHTIME STATUS PER MOST SIGNIFICANT PRIMARY TYPE
+
+chicago_crimes_nighttime_type_top10 <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(`Primary Type`, Nightime) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_nighttime_type_top10, aes(x = `Primary Type`, y = prop, fill = Nightime)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Types of Crime by Nightime") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE)) +
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed")  + coord_flip()
+
+```
+
+```{r}
+
+# NIGHTIME STATUS PER PRIMARY TYPE
+
+chicago_crimes_nighttime_type <- chicago_crimes_2017_to_2022 %>%
+  group_by(`Primary Type`, Nightime) %>%
+  summarize(count = n()) %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_nighttime_type, aes(x = `Primary Type`, y = prop, fill = Nightime)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Primary Type", y = "Proportion of crimes", title = "Types of Crime by Nightime") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4))+
+  guides(fill = guide_legend(reverse = TRUE))+
+  geom_hline(yintercept = 0.5, color = "black", linetype = "dashed")  + coord_flip()
+
+
+```
+
+```{r}
+
+# DISTRIBUTION OF CRIME PER WEEKDAY
+
+chicago_crimes_hour_type <- chicago_crimes_2017_to_2022 %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(WeekDay, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_hour_type, aes(x = WeekDay, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Week Day", y = "Crime Count", title = "Type of Crime per Day of the Week") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) +
+  scale_x_continuous(breaks=1:7, labels=c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))
+
+# not significant
+
+```
+
+
+```{r}
+
+# TIME PASSED FROM THE REPORT TO THE UPDATE
+
+
+chicago_crimes_update_type <- chicago_crimes_clean %>%
+  mutate(UpdateCategory = cut(as.numeric(UpdateDays), 
+                             breaks = c(0, 1, 7, 30, 90, 180, 365, Inf),
+                             labels = c("Less than a day", "Less than a week", "Less than a month", 
+                                        "Less than 3 months", "Less than 6 months",
+                                        "Less than a year", "More than a year"))) %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(UpdateCategory, `Primary Type`) %>%
+  summarize(count = n())
+
+# Create the plot
+ggplot(chicago_crimes_update_type, aes(x = UpdateCategory, y = count, fill = `Primary Type`)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Time Between Report and Update", y = "Crime Count", title = "Type by Time Between Report and Update") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8)) 
+
+
+
+```
+
+
+```{r}
+# ARREST STATUS PER TIME PASSED FROM THE REPORT TO THE UPDATE
+
+chicago_crimes_update_arrest <- chicago_crimes_clean %>%
+  mutate(UpdateCategory = cut(as.numeric(UpdateDays), 
+                             breaks = c(0, 1, 7, 30, 90, 180, 365, Inf),
+                             labels = c("Less than a day", "Less than a week", "Less than a month", 
+                                        "Less than 3 months", "Less than 6 months",
+                                        "Less than a year", "More than a year"))) %>%
+  group_by(UpdateCategory, Arrest) %>%
+  summarize(count = n())  %>%
+  mutate(prop = count / sum(count))
+
+# Create the plot
+ggplot(chicago_crimes_update_arrest, aes(x = UpdateCategory, y = prop, fill = Arrest)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(x = "Time Between Report and Update", y = "Proportion of Crimes", title = "Arrest Status by Time Between Report and Update") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+
+```
+
+```{r}
+
+# https://rpubs.com/charlie_rosemond/data607final
+
+# map chicago city
+
+```
+
+
+
+```{r}
+#Distance in Km
+ward42_lon <- chicago_crimes_2017_to_2022 %>% filter(Ward==42) %>% summarise(mean(Longitude))
+ward42_lat <- chicago_crimes_2017_to_2022 %>% filter(Ward==42) %>% summarise(mean(Latitude))
+ward42_lon <- as.numeric(ward42_lon)
+ward42_lat <- as.numeric(ward42_lat)
+
+
+chicago_crimes_2017_to_2022$dist_ward42 <- distm(chicago_crimes_2017_to_2022[,19:18], c(ward42_lon,ward42_lat), fun = distHaversine)
+
+
+```
+
+```{r}
+ward_types <- chicago_crimes_2017_to_2022 %>% select(Ward)
+ward_types <- unique(ward_types)
+
+chicago_wards <- chicago_crimes_2017_to_2022 %>%
+  group_by(Ward) %>%
+  summarize(count = n()) %>%
+  mutate(Ward = Ward) %>%
+  mutate(count = count)
+#ward42_lon <- chicago_crimes_2017_to_2022 %>% filter(Ward==42) %>% summarise(mean(Longitude))
+
+for (i in 1:50){
+  value = chicago_wards$Ward[i]
+  chicago_wards$dist[i] <- chicago_crimes_2017_to_2022 %>% filter(Ward==value) %>% summarise(mean(dist_ward42))
+}
+
+chicago_wards$dist[42] <- 0
+chicago_wards$dist <- as.numeric(chicago_wards$dist)
+```
+
+```{r}
+for (i in 1:nrow(chicago_crimes_2017_to_2022)){
+  value = chicago_crimes_2017_to_2022$Ward[i]
+  value2 = which(chicago_wards$Ward == value) # retorna o indice da row
+  value2 = as.integer(value2)
+  chicago_crimes_2017_to_2022$dist[i] <- chicago_wards$dist[value2]
+}
+
+#chicago_crimes_2017_to_2022 <- subset (chicago_crimes_2017_to_2022, select = -dist_ward42)
+#write_csv(chicago_crimes_2017_to_2022, "chicago_crimes_2017_to_2022.csv")
+```
+
+```{r}
+ggplot(chicago_wards, aes(x = reorder(Ward, dist), y = count)) +
+  geom_bar(stat = "identity", width = 0.8, position = "stack") +
+  scale_fill_brewer(palette = "Set3") +
+  labs(x = "Ward", y = "Crime Count", title = "Crime per Chicago Ward with ascending distance to the main ward (42)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+        legend.position = "bottom",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8))
+```
+

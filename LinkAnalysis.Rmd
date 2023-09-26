@@ -1,0 +1,347 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+setwd("D:/Filipa/Documents/CompSci/DataMiningII/Assignment")
+library(igraph)
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(qgraph)
+
+# Read the dataset
+chicago_crimes <- read_csv("chicago_crimes_2017_to_2022.csv")
+```
+
+***Link Analysis of top 10 crimes -> wards and primary crimes (User -> ward / Page -> Primary Crime)***
+
+```{r}
+
+# Determine the top primary types
+top_primary_types <- chicago_crimes %>%
+  count(`Primary Type`) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  pull(`Primary Type`)
+
+chicago_crimes_count <- chicago_crimes %>%
+  select(Ward, `Primary Type`) %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  group_by(Ward, `Primary Type`) %>%
+  summarize(Count = n())
+  
+chicago_crimes_count <- chicago_crimes_count %>%
+  group_by(Ward) %>%
+  mutate(total_count = sum(Count))
+
+chicago_crimes_count <- chicago_crimes_count %>%
+  group_by(Ward, `Primary Type`) %>%
+  mutate(prop = Count / total_count)
+
+# Create a color mapping for crime types
+crime_colors <- c("#8DD3C7", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69", "#FCCDE5", "#D9D9D9", "#BC80BD")
+
+# Create a color mapping for crime types
+crime_color_mapping <- setNames(crime_colors[1:length(top_primary_types)], top_primary_types)
+
+# Add color column to the dataframe
+chicago_crimes_count <- chicago_crimes_count %>%
+  mutate(crime_colors = crime_color_mapping[`Primary Type`])
+
+# Generate a vector of colors for the top primary types
+top_primary_colors <- crime_color_mapping[top_primary_types]
+
+# Create an empty graph with weighted edges
+graph_weighted <- graph.empty(directed = FALSE)
+
+# Add vertices (wards) to the graph
+ward_vertices <- unique(chicago_crimes_count$Ward)
+graph_weighted <- add.vertices(graph_weighted, nv = length(ward_vertices), name = ward_vertices)
+
+
+# Iterate over pairs of wards
+for (i in 1:(length(ward_vertices) - 1)) {
+  for (j in (i + 1):length(ward_vertices)) {
+    ward_a <- ward_vertices[i]
+    ward_b <- ward_vertices[j]
+    
+    # Get the primary types for each ward
+    ward_a_primary_types <- unique(chicago_crimes_count$`Primary Type`[chicago_crimes_count$Ward == ward_a])
+    ward_b_primary_types <- unique(chicago_crimes_count$`Primary Type`[chicago_crimes_count$Ward == ward_b])
+    
+    # Find the shared primary types between wards
+    shared_primary_types <- intersect(ward_a_primary_types, ward_b_primary_types)
+    
+    # Add edges (links) between wards for each shared primary type
+    for (primary_type in shared_primary_types) {
+      edge_weight <- sum(chicago_crimes_count$Count[chicago_crimes_count$Ward == ward_a & chicago_crimes_count$`Primary Type` == primary_type]) +
+                     sum(chicago_crimes_count$Count[chicago_crimes_count$Ward == ward_b & chicago_crimes_count$`Primary Type` == primary_type])
+      edge_weight <- edge_weight / 2
+      edge_color <- crime_color_mapping[primary_type]
+      
+      # Add an edge for each shared primary type with the weight representing the normalized crime count
+      graph_weighted <- add.edges(graph_weighted, c(ward_a, ward_b), label = primary_type, weight = edge_weight, color = edge_color)
+    }
+  }
+}
+
+
+
+
+```
+```{r}
+E(graph_weighted)$weight <- E(graph_weighted)$weight / max(E(graph_weighted)$weight)
+```
+
+
+```{r}
+
+calculate_centralities <- function(graph) {
+  # Calculate degree centrality
+  degree_centrality <- strength(graph, v = V(graph), weights = E(graph)$weight)
+
+  # Calculate betweenness centrality
+  betweenness_centrality <- betweenness(graph, v = V(graph), directed = FALSE, weights = E(graph)$weight, normalized = TRUE)
+
+  # Calculate closeness centrality
+  closeness_centrality <- closeness(graph, v = V(graph), weights = E(graph)$weight, normalized = TRUE)
+
+  # Calculate eigenvector centrality
+  eigenvector_centrality <- eigen_centrality(graph, directed = FALSE, weights = E(graph)$weight)$vector
+
+  centrality_measures <- data.frame(
+    Node = V(graph)$name,
+    DegreeCentrality = degree_centrality,
+    BetweennessCentrality = betweenness_centrality,
+    ClosenessCentrality = closeness_centrality,
+    EigenvectorCentrality = eigenvector_centrality  )
+
+  return(centrality_measures)
+}
+
+print_centrality_extremes <- function(centrality_measures) {
+  # Find the node names corresponding to the highest and lowest values for each centrality measure (except betweenness)
+  degree_max <- max(centrality_measures$DegreeCentrality)
+  degree_min <- min(centrality_measures$DegreeCentrality)
+  degree_max_node <- centrality_measures$Node[which(centrality_measures$DegreeCentrality == degree_max)]
+  degree_min_node <- centrality_measures$Node[which(centrality_measures$DegreeCentrality == degree_min)]
+
+  closeness_max <- max(centrality_measures$ClosenessCentrality)
+  closeness_min <- min(centrality_measures$ClosenessCentrality)
+  closeness_max_node <- centrality_measures$Node[which(centrality_measures$ClosenessCentrality == closeness_max)]
+  closeness_min_node <- centrality_measures$Node[which(centrality_measures$ClosenessCentrality == closeness_min)]
+
+  eigenvector_max <- max(centrality_measures$EigenvectorCentrality)
+  eigenvector_min <- min(centrality_measures$EigenvectorCentrality)
+  eigenvector_max_node <- centrality_measures$Node[which(centrality_measures$EigenvectorCentrality == eigenvector_max)]
+  eigenvector_min_node <- centrality_measures$Node[which(centrality_measures$EigenvectorCentrality == eigenvector_min)]
+
+  # Print the highest and lowest values for each centrality measure along with the corresponding node names
+  cat("Degree Centrality:\n")
+  cat("Highest value:", degree_max, "for node:", degree_max_node, "\n")
+  cat("Lowest value:", degree_min, "for node:", degree_min_node, "\n\n")
+
+  cat("Closeness Centrality:\n")
+  cat("Highest value:", closeness_max, "for node:", closeness_max_node, "\n")
+  cat("Lowest value:", closeness_min, "for node:", closeness_min_node, "\n\n")
+
+  cat("Eigenvector Centrality:\n")
+  cat("Highest value:", eigenvector_max, "for node:", eigenvector_max_node, "\n")
+  cat("Lowest value:", eigenvector_min, "for node:", eigenvector_min_node, "\n")
+}
+
+
+
+centralities_data <- calculate_centralities(graph_weighted)
+print(centralities_data)
+print_centrality_extremes(centralities_data)
+
+
+
+```
+
+```{r}
+# Perform layout
+layout <- layout_with_fr(graph_weighted)
+
+# Plot the graph with weighted edges
+plot(graph_weighted, layout = layout,
+     vertex.label = V(graph_weighted)$name, vertex.size = 18, vertex.label.cex = 0.8,
+     edge.width = E(graph_weighted)$weight, edge.label = NA,
+     edge.color = E(graph_weighted)$color)
+
+# Create a legend
+legend("bottomright", legend = top_primary_types, fill = top_primary_colors,
+       title = "Crime Types", cex = 0.8)
+
+```
+
+
+```{r}
+# Apply the Louvain method for community detection
+communities <- cluster_louvain(graph_weighted, weights = E(graph_weighted)$weight, resolution = 1)
+
+# Calculate modularity using the communities
+modularity_value <- as.numeric(modularity(communities))
+
+# Print the modularity value
+print(paste("Modularity:", modularity_value))
+
+# Get the membership vector indicating the community membership of each vertex
+membership <- membership(communities)
+
+# Generate colors for each community
+num_communities <- max(membership)
+community_colors <- rainbow(num_communities)
+
+# Plot the graph with weighted edges, larger node size, and non-overlapping layout
+layout <- layout_with_fr(graph_weighted, maxiter = 10000)
+# Plot the graph with weighted edges
+plot(graph_weighted, layout = layout,
+     vertex.label = V(graph_weighted)$name, vertex.size = 18, vertex.label.cex = 0.8,
+     edge.width = E(graph_weighted)$weight, edge.label = NA, vertex.color = crime_colors[membership],
+     edge.color = E(graph_weighted)$color)
+
+# Create a legend
+legend("bottomright", legend = top_primary_types, fill = top_primary_colors,
+       title = "Crime Types", cex = 0.6)
+title("Ward Communities using Louvain")
+
+```
+
+```{r}
+# Filter the graph to include only NARCOTICS edges
+filtered_edges <- E(graph_weighted)[edge_attr(graph_weighted)$label == "NARCOTICS"]
+
+# Create a subgraph with the filtered edges and incident vertices
+filtered_graph <- subgraph.edges(graph_weighted, eids = filtered_edges, delete.vertices = FALSE)
+
+# Apply the Louvain method for community detection
+communities <- cluster_louvain(filtered_graph, weights = E(filtered_graph)$weight, resolution = 1.)
+
+# Calculate modularity using the communities
+modularity_value <- as.numeric(modularity(communities))
+
+# Print the modularity value
+print(paste("Modularity:", modularity_value))
+
+# Get the membership vector indicating the community membership of each vertex
+membership <- membership(communities)
+
+# Generate colors for each community
+num_communities <- max(membership)
+community_colors <- rainbow(num_communities)
+
+layout <- layout_with_fr(filtered_graph, maxiter = 10000)
+# Plot the filtered graph
+plot(filtered_graph, layout = layout,
+     edge.width = E(graph_weighted)$weight, edge.color = E(filtered_graph)$color, edge.label = NA,
+     vertex.label = V(filtered_graph)$name, vertex.size = 18, vertex.color = crime_colors[membership],vertex.label.cex = 0.8)
+
+# Create a separate legend for crime types
+legend(x = "bottomright", legend = top_primary_types, fill = top_primary_colors, title = "Crime Types",
+       x.intersp = 0.2, y.intersp = 0.8, cex = 0.6)
+
+title("Wards Communities using Louvain")
+
+
+```
+
+```{r}
+# Filter the graph to include only NARCOTICS edges
+narcotics_edges <- E(graph_weighted)[edge_attr(graph_weighted)$label == "NARCOTICS"]
+
+# Filter the graph to include only NARCOTICS edges with weight greater than 0.1 * max weight for narcotics
+filtered_edges <- narcotics_edges[narcotics_edges$weight > 0.05]
+
+# Create a subgraph with the filtered edges and incident vertices
+filtered_graph <- subgraph.edges(graph_weighted, eids = filtered_edges, delete.vertices = FALSE)
+
+# Apply the Louvain method for community detection
+communities <- cluster_louvain(filtered_graph, weights = E(filtered_graph)$weight, resolution = 1)
+# Get the membership vector indicating the community membership of each vertex
+membership <- membership(communities)
+
+# Calculate modularity using the communities
+modularity_value <- as.numeric(modularity(communities))
+
+# Print the modularity value
+print(paste("Modularity:", modularity_value))
+
+# Generate colors for each community
+num_communities <- max(membership)
+community_colors <- rainbow(num_communities)
+
+layout <- layout_with_kk(filtered_graph)
+
+# Plot the filtered graph
+plot(filtered_graph, layout = layout,
+     edge.width = E(graph_weighted)$weight, edge.color = E(filtered_graph)$color, edge.label = NA,
+     vertex.label = V(filtered_graph)$name, vertex.size = 15, vertex.color = crime_colors[membership], vertex.label.cex = 0.8)
+
+# Create a separate legend for crime types
+legend(x = "bottomright", legend = top_primary_types, fill = top_primary_colors, title = "Crime Types",
+       x.intersp = 0.2, y.intersp = 0.8, cex = 0.6)
+
+title("Ward Communities Found using Louvain")
+```
+
+```{r}
+centralities_data <- calculate_centralities(filtered_graph)
+print(centralities_data)
+print_centrality_extremes(centralities_data)
+
+```
+```{r}
+# Filter the graph to include only NARCOTICS, DECEPTIVE PRACTICE, and THEFT edges
+filtered_edges <- E(graph_weighted)[edge_attr(graph_weighted)$label %in% c("DECEPTIVE PRACTICE", "THEFT")]
+
+# Create a subgraph with the filtered edges and incident vertices
+filtered_graph <- subgraph.edges(graph_weighted, eids = filtered_edges, delete.vertices = FALSE)
+
+# Apply the Louvain method for community detection
+communities <- cluster_louvain(filtered_graph, weights = E(filtered_graph)$weight, resolution = 1)
+
+
+# Calculate modularity using the communities
+modularity_value <- as.numeric(modularity(communities))
+
+# Print the modularity value
+print(paste("Modularity:", modularity_value))
+
+# Get the membership vector indicating the community membership of each vertex
+membership <- membership(communities)
+
+# Generate colors for each community
+num_communities <- max(membership)
+community_colors <- rainbow(num_communities)
+
+layout <- layout_with_kk(filtered_graph, maxiter = 10000)
+# Plot the filtered graph
+plot(filtered_graph, layout = layout,
+     edge.width = E(graph_weighted)$weight/max(E(graph_weighted)$weight), edge.color = E(filtered_graph)$color, edge.label = NA,
+     vertex.label = V(filtered_graph)$name, vertex.size = 18, vertex.color = crime_colors[membership],vertex.label.cex = 0.8)
+
+# Create a separate legend for crime types
+legend(x = "bottomright", legend = top_primary_types, fill = top_primary_colors, title = "Crime Types",
+       x.intersp = 0.2, y.intersp = 0.8, cex = 0.6)
+
+title("Wards Communities using Louvain")
+
+```
+
+```{r}
+centralities_data <- calculate_centralities(filtered_graph)
+print(centralities_data)
+print_centrality_extremes(centralities_data)
+
+```
+
+

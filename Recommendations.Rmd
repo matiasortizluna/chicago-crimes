@@ -1,0 +1,852 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+setwd("C:/Users/nezfa/OneDrive/Ambiente de Trabalho/Unidades Curriculares/Data Mining 2/Projeto/Code/Recommendations")
+library(recommenderlab)
+library(readr)
+library(dplyr)
+library(tidyverse)
+```
+
+
+```{r}
+# Read the dataset
+chicago_crimes <- read_csv("chicago_crimes_2017_to_2022.csv")
+
+# Preview the first few rows of the dataset
+head(chicago_crimes)
+```
+*** Pre covid***
+```{r}
+# Users -> wards
+# Pages -> Primary types
+# Determine the top primary types
+top_primary_types <- chicago_crimes %>%
+  count(`Primary Type`) %>%
+  arrange(n) %>%
+  slice_head(n = 10) %>%
+  pull(`Primary Type`)
+
+# Filter the data to include only the top primary types
+tb_ward_primaryType <- chicago_crimes %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  filter(YearMonth < "2020-04-01") %>%
+  select(Ward, `Primary Type`)
+
+#tb_ward_primaryType <- chicago_crimes %>% select(Ward, `Primary Type`)
+```
+
+Top 3 Types of Crime
+```{r}
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3)
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3) %>% pull(`Primary Type`)
+```
+***Recommendation using Clustering***
+
+Clustering
+
+```{r}
+# Matrix that has on each row a Ward(user) and for each Ward
+# the information on number of crime; this can be obtained with the table() function
+dat <- table(tb_ward_primaryType$Ward, tb_ward_primaryType$`Primary Type`)
+
+# function dist() to obtain a distance matrix with the Euclidean distance between the wards;
+dm <- dist(dat) # By default uses euclidean distance
+#dm
+
+# function hclust() with the distance matrix to obtain an agglomerative clustering model of this data
+cl <- hclust(dm)
+
+# Visualize the obtained dendogram with function plot()
+plot(cl)
+plot(cl, hang=-0.1)
+
+
+# use the function cutree() to ”cut” the hierarchical clustering in just two clusters; inspect the cluster membership of each user
+cm <- cutree(cl, 3)
+
+# use the function rect.hclust() to draw the previous solution in thedendogram
+rect.hclust(cl, 3)
+
+
+```
+Analyze cluster 1
+```{r}
+# Add the clusters attribute
+tb_ward_primaryType_c <- mutate(tb_ward_primaryType, cluster = cm[tb_ward_primaryType$Ward])
+
+# inspect what were the crimes in cluster 1
+# select crimes that belong to the cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+Analyze cluster 2
+```{r}
+# inspect what were the crimes in cluster 2
+# select crimes that belong to the cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+Analyze cluster 3
+```{r}
+# inspect what were the crimes in cluster 3
+# select crimes that belong to the cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+```
+***Recommendation using Association Rules***
+```{r}
+# Coercing the data frame with ward-primary_type access information to a binaryRatingMatrix (brm)
+brm <- as(as.data.frame(tb_ward_primaryType), "binaryRatingMatrix")
+brm
+```
+
+```{r}
+# select the information on the first 42 Wards to be used as training offline data and save it to a new variable (e.g brm_offline)
+brm_offline <- brm[1:50]
+brm_offline
+# checking the data frame
+getData.frame(brm_offline)
+# The information about the data structure
+getRatingMatrix(brm_offline)
+# The best way to 'look' at rating matrices
+#inspect(getRatingMatrix(brm_offline))
+```
+
+```{r}
+r <- rowCounts(brm_offline)
+r
+```
+
+```{r}
+c <- colCounts(brm_offline)
+c
+```
+
+
+```{r}
+image(brm_offline)
+```
+
+
+```{r}
+# obtain the recommender model based on association 
+modelAR <- Recommender(brm_offline, "AR") # AR = Association Rules
+
+#6 g)
+# check the model
+getModel(modelAR)
+
+# A -> B
+# lhs -> rhs (left end side -> right end side)
+
+rules <- getModel(modelAR)$rule_base
+inspect(subset(rules, confidence > 0.9 & support > 0.6))
+#inspect(rules)
+```
+
+*** Pos covid***
+
+
+```{r}
+# Users -> wards
+# Pages -> Primary types
+# Determine the top primary types
+top_primary_types <- chicago_crimes %>%
+  count(`Primary Type`) %>%
+  arrange(n) %>%
+  slice_head(n = 10) %>%
+  pull(`Primary Type`)
+
+# Filter the data to include only the top primary types
+tb_ward_primaryType <- chicago_crimes %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  filter(YearMonth >= "2020-04-01") %>%
+  select(Ward, `Primary Type`)
+
+#tb_ward_primaryType <- chicago_crimes %>% select(Ward, `Primary Type`)
+```
+
+Top 3 Types of Crime
+```{r}
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3)
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Clustering***
+
+Clustering
+
+```{r}
+# Matrix that has on each row a Ward(user) and for each Ward
+# the information on number of crime; this can be obtained with the table() function
+dat <- table(tb_ward_primaryType$Ward, tb_ward_primaryType$`Primary Type`)
+
+# function dist() to obtain a distance matrix with the Euclidean distance between the wards;
+dm <- dist(dat) # By default uses euclidean distance
+#dm
+
+# function hclust() with the distance matrix to obtain an agglomerative clustering model of this data
+cl <- hclust(dm)
+
+# Visualize the obtained dendogram with function plot()
+plot(cl)
+plot(cl, hang=-0.1)
+
+
+# use the function cutree() to ”cut” the hierarchical clustering in just two clusters; inspect the cluster membership of each user
+cm <- cutree(cl, 3)
+
+# use the function rect.hclust() to draw the previous solution in thedendogram
+rect.hclust(cl, 3)
+
+
+```
+
+
+Analyze cluster 1
+```{r}
+# Add the clusters attribute
+tb_ward_primaryType_c <- mutate(tb_ward_primaryType, cluster = cm[tb_ward_primaryType$Ward])
+
+# inspect what were the crimes in cluster 1
+# select crimes that belong to the cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+
+Analyze cluster 2
+```{r}
+# inspect what were the crimes in cluster 2
+# select crimes that belong to the cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+Analyze cluster 3
+```{r}
+# inspect what were the crimes in cluster 3
+# select crimes that belong to the cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Association Rules***
+```{r}
+# Coercing the data frame with ward-primary_type access information to a binaryRatingMatrix (brm)
+brm <- as(as.data.frame(tb_ward_primaryType), "binaryRatingMatrix")
+brm
+```
+
+```{r}
+# select the information on the first 42 Wards to be used as training offline data and save it to a new variable (e.g brm_offline)
+brm_offline <- brm[1:50]
+brm_offline
+# checking the data frame
+getData.frame(brm_offline)
+# The information about the data structure
+getRatingMatrix(brm_offline)
+# The best way to 'look' at rating matrices
+#inspect(getRatingMatrix(brm_offline))
+```
+
+
+```{r}
+r <- rowCounts(brm_offline)
+r
+```
+
+```{r}
+c <- colCounts(brm_offline)
+c
+```
+
+
+```{r}
+image(brm_offline)
+```
+
+
+```{r}
+# obtain the recommender model based on association 
+modelAR <- Recommender(brm_offline, "AR") # AR = Association Rules
+
+#6 g)
+# check the model
+getModel(modelAR)
+
+# A -> B
+# lhs -> rhs (left end side -> right end side)
+
+rules <- getModel(modelAR)$rule_base
+inspect(subset(rules, confidence > 0.9 & support > 0.6))
+#inspect(rules)
+```
+
+*** All time***
+
+
+```{r}
+# Users -> wards
+# Pages -> Primary types
+# Determine the top primary types
+top_primary_types <- chicago_crimes %>%
+  count(`Primary Type`) %>%
+  arrange(n) %>%
+  slice_head(n = 10) %>%
+  pull(`Primary Type`)
+
+# Filter the data to include only the top primary types
+tb_ward_primaryType <- chicago_crimes %>%
+  filter(`Primary Type` %in% top_primary_types) %>%
+  select(Ward, `Primary Type`)
+
+#tb_ward_primaryType <- chicago_crimes %>% select(Ward, `Primary Type`)
+```
+
+Top 3 Types of Crime
+```{r}
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3)
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Clustering***
+
+Clustering
+
+```{r}
+# Matrix that has on each row a Ward(user) and for each Ward
+# the information on number of crime; this can be obtained with the table() function
+dat <- table(tb_ward_primaryType$Ward, tb_ward_primaryType$`Primary Type`)
+
+# function dist() to obtain a distance matrix with the Euclidean distance between the wards;
+dm <- dist(dat) # By default uses euclidean distance
+#dm
+
+# function hclust() with the distance matrix to obtain an agglomerative clustering model of this data
+cl <- hclust(dm)
+
+# Visualize the obtained dendogram with function plot()
+plot(cl)
+plot(cl, hang=-0.1)
+
+
+# use the function cutree() to ”cut” the hierarchical clustering in just two clusters; inspect the cluster membership of each user
+cm <- cutree(cl, 3)
+
+# use the function rect.hclust() to draw the previous solution in thedendogram
+rect.hclust(cl, 3)
+
+
+```
+
+
+Analyze cluster 1
+```{r}
+# Add the clusters attribute
+tb_ward_primaryType_c <- mutate(tb_ward_primaryType, cluster = cm[tb_ward_primaryType$Ward])
+
+# inspect what were the crimes in cluster 1
+# select crimes that belong to the cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+
+Analyze cluster 2
+```{r}
+# inspect what were the crimes in cluster 2
+# select crimes that belong to the cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+Analyze cluster 3
+```{r}
+# inspect what were the crimes in cluster 3
+# select crimes that belong to the cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Association Rules***
+```{r}
+# Coercing the data frame with ward-primary_type access information to a binaryRatingMatrix (brm)
+brm <- as(as.data.frame(tb_ward_primaryType), "binaryRatingMatrix")
+brm
+```
+
+```{r}
+# select the information on the first 42 Wards to be used as training offline data and save it to a new variable (e.g brm_offline)
+brm_offline <- brm[1:50]
+brm_offline
+# checking the data frame
+getData.frame(brm_offline)
+# The information about the data structure
+getRatingMatrix(brm_offline)
+# The best way to 'look' at rating matrices
+#inspect(getRatingMatrix(brm_offline))
+```
+
+
+```{r}
+r <- rowCounts(brm_offline)
+r
+```
+
+```{r}
+c <- colCounts(brm_offline)
+c
+```
+
+
+```{r}
+image(brm_offline)
+```
+
+
+```{r}
+# obtain the recommender model based on association 
+modelAR <- Recommender(brm_offline, "AR") # AR = Association Rules
+
+#6 g)
+# check the model
+getModel(modelAR)
+
+# A -> B
+# lhs -> rhs (left end side -> right end side)
+
+rules <- getModel(modelAR)$rule_base
+inspect(subset(rules, confidence > 0.9 & support > 0.8))
+#inspect(rules)
+
+
+```
+*** All crimes All time***
+
+
+```{r}
+# Users -> wards
+# Pages -> Primary types
+# Determine the top primary types
+
+tb_ward_primaryType <- chicago_crimes %>% select(Ward, `Primary Type`)
+```
+
+Top 3 Types of Crime
+```{r}
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3)
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Clustering***
+
+Clustering
+
+```{r}
+# Matrix that has on each row a Ward(user) and for each Ward
+# the information on number of crime; this can be obtained with the table() function
+dat <- table(tb_ward_primaryType$Ward, tb_ward_primaryType$`Primary Type`)
+
+# function dist() to obtain a distance matrix with the Euclidean distance between the wards;
+dm <- dist(dat) # By default uses euclidean distance
+#dm
+
+# function hclust() with the distance matrix to obtain an agglomerative clustering model of this data
+cl <- hclust(dm)
+
+# Visualize the obtained dendogram with function plot()
+plot(cl)
+plot(cl, hang=-0.1)
+
+
+# use the function cutree() to ”cut” the hierarchical clustering in just two clusters; inspect the cluster membership of each user
+cm <- cutree(cl, 3)
+
+# use the function rect.hclust() to draw the previous solution in thedendogram
+rect.hclust(cl, 3)
+
+
+```
+
+
+Analyze cluster 1
+```{r}
+# Add the clusters attribute
+tb_ward_primaryType_c <- mutate(tb_ward_primaryType, cluster = cm[tb_ward_primaryType$Ward])
+
+# inspect what were the crimes in cluster 1
+# select crimes that belong to the cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+
+Analyze cluster 2
+```{r}
+# inspect what were the crimes in cluster 2
+# select crimes that belong to the cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+Analyze cluster 3
+```{r}
+# inspect what were the crimes in cluster 3
+# select crimes that belong to the cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Association Rules***
+```{r}
+# Coercing the data frame with ward-primary_type access information to a binaryRatingMatrix (brm)
+brm <- as(as.data.frame(tb_ward_primaryType), "binaryRatingMatrix")
+brm
+```
+
+```{r}
+# select the information on the first 42 Wards to be used as training offline data and save it to a new variable (e.g brm_offline)
+brm_offline <- brm[1:50]
+brm_offline
+# checking the data frame
+getData.frame(brm_offline)
+# The information about the data structure
+getRatingMatrix(brm_offline)
+# The best way to 'look' at rating matrices
+#inspect(getRatingMatrix(brm_offline))
+```
+
+
+```{r}
+r <- rowCounts(brm_offline)
+r
+```
+
+```{r}
+c <- colCounts(brm_offline)
+c
+```
+
+
+```{r}
+image(brm_offline)
+```
+
+
+```{r}
+# obtain the recommender model based on association 
+modelAR <- Recommender(brm_offline, "AR") # AR = Association Rules
+
+#6 g)
+# check the model
+getModel(modelAR)
+
+# A -> B
+# lhs -> rhs (left end side -> right end side)
+
+rules <- getModel(modelAR)$rule_base
+#inspect(subset(rules, confidence == 1 & support == 1))
+#inspect(rules)
+
+
+```
+*** All crimes pos covid***
+
+
+```{r}
+# Users -> wards
+# Pages -> Primary types
+# Determine the top primary types
+
+tb_ward_primaryType <- chicago_crimes %>% 
+  filter(YearMonth >= "2020-04-01") %>%
+  select(Ward, `Primary Type`)
+```
+
+Top 3 Types of Crime
+```{r}
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3)
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Clustering***
+
+Clustering
+
+```{r}
+# Matrix that has on each row a Ward(user) and for each Ward
+# the information on number of crime; this can be obtained with the table() function
+dat <- table(tb_ward_primaryType$Ward, tb_ward_primaryType$`Primary Type`)
+
+# function dist() to obtain a distance matrix with the Euclidean distance between the wards;
+dm <- dist(dat) # By default uses euclidean distance
+#dm
+
+# function hclust() with the distance matrix to obtain an agglomerative clustering model of this data
+cl <- hclust(dm)
+
+# Visualize the obtained dendogram with function plot()
+plot(cl)
+plot(cl, hang=-0.1)
+
+
+# use the function cutree() to ”cut” the hierarchical clustering in just two clusters; inspect the cluster membership of each user
+cm <- cutree(cl, 3)
+
+# use the function rect.hclust() to draw the previous solution in thedendogram
+rect.hclust(cl, 3)
+
+
+```
+
+
+Analyze cluster 1
+```{r}
+# Add the clusters attribute
+tb_ward_primaryType_c <- mutate(tb_ward_primaryType, cluster = cm[tb_ward_primaryType$Ward])
+
+# inspect what were the crimes in cluster 1
+# select crimes that belong to the cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+
+Analyze cluster 2
+```{r}
+# inspect what were the crimes in cluster 2
+# select crimes that belong to the cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+Analyze cluster 3
+```{r}
+# inspect what were the crimes in cluster 3
+# select crimes that belong to the cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Association Rules***
+```{r}
+# Coercing the data frame with ward-primary_type access information to a binaryRatingMatrix (brm)
+brm <- as(as.data.frame(tb_ward_primaryType), "binaryRatingMatrix")
+brm
+```
+
+```{r}
+# select the information on the first 42 Wards to be used as training offline data and save it to a new variable (e.g brm_offline)
+brm_offline <- brm[1:50]
+brm_offline
+# checking the data frame
+getData.frame(brm_offline)
+# The information about the data structure
+getRatingMatrix(brm_offline)
+# The best way to 'look' at rating matrices
+#inspect(getRatingMatrix(brm_offline))
+```
+
+
+```{r}
+r <- rowCounts(brm_offline)
+r
+```
+
+```{r}
+c <- colCounts(brm_offline)
+c
+```
+
+
+```{r}
+image(brm_offline)
+```
+
+*** All crimes pre covid***
+
+
+```{r}
+# Users -> wards
+# Pages -> Primary types
+# Determine the top primary types
+
+tb_ward_primaryType <- chicago_crimes %>% 
+  filter(YearMonth < "2020-04-01") %>%
+  select(Ward, `Primary Type`)
+```
+
+Top 3 Types of Crime
+```{r}
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3)
+tb_ward_primaryType %>% group_by(`Primary Type`) %>% tally(sort = TRUE) %>% top_n(3) %>% pull(`Primary Type`)
+```
+
+
+***Recommendation using Clustering***
+
+Clustering
+
+```{r}
+# Matrix that has on each row a Ward(user) and for each Ward
+# the information on number of crime; this can be obtained with the table() function
+dat <- table(tb_ward_primaryType$Ward, tb_ward_primaryType$`Primary Type`)
+
+# function dist() to obtain a distance matrix with the Euclidean distance between the wards;
+dm <- dist(dat) # By default uses euclidean distance
+#dm
+
+# function hclust() with the distance matrix to obtain an agglomerative clustering model of this data
+cl <- hclust(dm)
+
+# Visualize the obtained dendogram with function plot()
+plot(cl)
+plot(cl, hang=-0.1)
+
+
+# use the function cutree() to ”cut” the hierarchical clustering in just two clusters; inspect the cluster membership of each user
+cm <- cutree(cl, 3)
+
+# use the function rect.hclust() to draw the previous solution in thedendogram
+rect.hclust(cl, 3)
+
+
+```
+
+
+Analyze cluster 1
+```{r}
+# Add the clusters attribute
+tb_ward_primaryType_c <- mutate(tb_ward_primaryType, cluster = cm[tb_ward_primaryType$Ward])
+
+# inspect what were the crimes in cluster 1
+# select crimes that belong to the cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 1
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 1) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+
+Analyze cluster 2
+```{r}
+# inspect what were the crimes in cluster 2
+# select crimes that belong to the cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 2
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 2) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+
+```
+
+
+Analyze cluster 3
+```{r}
+# inspect what were the crimes in cluster 3
+# select crimes that belong to the cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% select(`Primary Type`)
+# Count the number of crimes per ward in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally()
+# Obtain the top 5 Types of crime in cluster 3
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5)
+filter(tb_ward_primaryType_c, cluster == 3) %>% group_by(`Primary Type`) %>% tally(sort=TRUE) %>% top_n(5) %>% pull(`Primary Type`)
+```
+

@@ -1,0 +1,150 @@
+---
+title: "Machine Learning Models"
+output: html_notebook
+---
+
+```{r}
+########### Import libraries ########### 
+library(readr) 
+library(dplyr) 
+library(ggplot2) 
+library(tidyverse) 
+library(tidymodels) 
+
+library(caret)
+library(rpart) 
+library(partykit)
+library(randomForest)
+library(e1071)
+library(vip)
+
+library(pROC)
+
+```
+
+```{r}
+########### Read Data ########### 
+
+#Sets the working directory
+setwd("/Users/matiasluna/Library/CloudStorage/OneDrive-UniversidadedoPorto/1 ano/2 semestre/Data MiningII CC4024/Project/datasets")
+getwd()
+
+#Reads the CSV file
+#df <- read_csv("Crimes_2017_to_Present.csv")
+#df <- read_csv("chicago_crimes_clean.csv")
+df <- read_csv("chicago_crimes_2017_2023.csv")
+#df <- read_csv("chicago_crimes_2017_to_2022.csv")
+#df <- read_csv("chicago_crimes_2023.csv")
+head(df)
+names(df)
+```
+
+```{r}
+########### Data Preparation ########### 
+
+#Selects specific columns and exclude others
+df <- df %>% select(-c('ID','Case Number'))
+glimpse(df)
+
+#Converts columns to other data types
+df$`FBI Code` <- as.factor(df$`FBI Code`)
+df$`Primary Type` <- as.factor(df$`Primary Type`)
+
+df$`Community Area` <- as.numeric(df$`Community Area`)
+
+df$Beat <- as.numeric(df$Beat)
+df$District <- as.numeric(df$District)
+df$Ward <- as.numeric(df$Ward)
+
+df$Year <- as.numeric(df$Year)
+df$Hour <- as.numeric(df$Hour)
+df$WeekDay <- as.numeric(df$WeekDay)
+df$Month <- as.numeric(df$Month)
+df$Nightime <- as.numeric(df$Nightime)
+
+df$TimeOfDay <- as.factor(df$TimeOfDay)
+df$Season <- as.factor(df$Season)
+
+df$Latitude <- as.numeric(df$Latitude)
+df$Longitude <- as.numeric(df$Longitude)
+
+df$Domestic <- as.numeric(df$Domestic)
+df$Arrest <- as.factor(df$Arrest)
+
+df$Block <- as.factor(df$Block)
+df$Description <- as.factor(df$Description)
+df$`Location Description` <- as.factor(df$`Location Description`)
+df <- df %>% rename(Location_Description = `Location Description`)
+df$IUCR <- as.numeric(df$IUCR)
+df$UpdateDays <- as.numeric(df$UpdateDays)
+df$`Updated On` <- as.numeric(df$`Updated On`)
+df <- df %>% rename(Updated_On = `Updated On`)
+df$Date <- as.Date(df$Date)
+df$YearMonth <- as.Date(df$YearMonth)
+
+#Rename the columns
+df <- df %>% rename(Primary_Type = `Primary Type`)
+df <- df %>% rename(FBI_Code = `FBI Code`)
+df <- df %>% rename(Community_Area = `Community Area`)
+
+df <- drop_na(df)
+glimpse(df)
+head(df)
+```
+
+```{r}
+########### Data Splitting ########### 
+
+#Splits the data into training and testing datasets.
+set.seed(123)
+df_split <- initial_split(df,prop = 0.7,strata = Arrest)
+# Create training data
+df_train <- df_split %>%training()
+# Create testing data
+df_test <- df_split %>%testing()
+
+#Displays the number of rows in the training and testing datasets.
+nrow(df_train)
+nrow(df_test)
+
+```
+
+```{r}
+########### Logical Approaches: Tree-based Models: CART (Classification and Regression Trees) ###########
+
+#Definition of a CART model with the train data
+cart_model <- rpart(Arrest ~ ., data = df_train)
+plot(cart_model)
+text(cart_model)
+#Make predictions using the model on the test data
+cart_predictions <- predict(cart_model, newdata = df_test, type = "class")
+
+#Prediction of the class
+cart_pred_class <- predict(cart_model, newdata = df_test, type = "class")
+head(cart_pred_class)
+#Prediction of the probabilities
+cart_pred_prob <- predict(cart_model, newdata = df_test, type = "prob")
+head(cart_pred_prob)
+
+########### Logical Approaches: Tree-based Models: CART (Classification and Regression Trees) Result Analysis ########### 
+
+#Calculate the results of the prediction against the actual values
+cart_results <- df_test %>% select(Arrest) %>% bind_cols(.pred_class = as.factor(cart_pred_class),as.data.frame(cart_pred_prob))
+head(cart_results)
+
+#Creates a ROC curve and the AUC value.
+roc_auc(cart_results,truth = Arrest,`TRUE`)
+cart_results %>% roc_curve(truth = Arrest, `TRUE`) %>% autoplot()
+```
+
+```{r}
+########### Importance of features ########### 
+
+feature_importance <- NA
+
+#Calculate feature importance
+feature_importance$cart <- vi(cart_model)
+#Visualize feature importance
+vip(feature_importance$cart,num_features=20)
+
+```
